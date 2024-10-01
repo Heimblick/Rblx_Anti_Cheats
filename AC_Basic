@@ -1,0 +1,121 @@
+--// For roblox Studio
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+-- Discord webhook URL (replace with your webhook URL)
+local DISCORD_WEBHOOK_URL = "YOUR_WEBHOOK_URL_HERE" -- Change this to your webhook
+
+-- Configure these thresholds as needed
+local FLY_THRESHOLD = 50 -- Height above ground for fly detection
+local NOCLIP_CHECK_INTERVAL = 1 -- Time in seconds to check for noclip
+local TELEPORT_THRESHOLD = 10 -- Distance that would be considered teleporting
+
+-- Table to track players
+local playerData = {}
+
+-- Function to send a message to Discord
+local function sendDiscordMessage(player, action)
+    local data = {
+        content = string.format("Player ID: %s has been detected for %s", player.UserId, action),
+        username = "Anti-Cheat Bot", -- Change this to your desired bot name
+        avatar_url = "https://example.com/avatar.png" -- Optional: Change to your desired avatar URL
+    }
+
+    local jsonData = HttpService:JSONEncode(data)
+
+    local success, response = pcall(function()
+        return HttpService:PostAsync(DISCORD_WEBHOOK_URL, jsonData, Enum.HttpContentType.ApplicationJson)
+    end)
+
+    if not success then
+        warn("Failed to send message to Discord: " .. tostring(response))
+    end
+end
+
+-- Initialize player data
+local function onPlayerAdded(player)
+    playerData[player.UserId] = {
+        lastPosition = nil,
+        lastHeight = 0,
+        lastCheckTime = os.clock()
+    }
+end
+
+-- Remove player data when they leave
+local function onPlayerRemoving(player)
+    playerData[player.UserId] = nil
+end
+
+-- Check if player is flying
+local function isFlying(player)
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local currentHeight = character.HumanoidRootPart.Position.Y
+        local lastHeight = playerData[player.UserId].lastHeight
+
+        if currentHeight > FLY_THRESHOLD and currentHeight > lastHeight + 10 then
+            return true
+        end
+
+        playerData[player.UserId].lastHeight = currentHeight
+    end
+    return false
+end
+
+-- Check for noclip
+local function isNoclipping(player)
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local humanoidRootPart = character.HumanoidRootPart
+        local ray = Ray.new(humanoidRootPart.Position, Vector3.new(0, -3, 0))
+        local hit, position = Workspace:FindPartOnRay(ray, character)
+
+        if not hit then
+            return true -- Player is noclipping
+        end
+    end
+    return false
+end
+
+-- Check for teleporting
+local function isTeleporting(player)
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local currentPos = character.HumanoidRootPart.Position
+        local lastPos = playerData[player.UserId].lastPosition or currentPos
+
+        local distance = (currentPos - lastPos).magnitude
+
+        -- Check if distance exceeds teleport threshold
+        if distance > TELEPORT_THRESHOLD then
+            return true
+        end
+
+        playerData[player.UserId].lastPosition = currentPos
+    end
+    return false
+end
+
+-- Monitor players
+RunService.Heartbeat:Connect(function()
+    for _, player in pairs(Players:GetPlayers()) do
+        if playerData[player.UserId] then
+            if isFlying(player) then
+                sendDiscordMessage(player, "Flying")
+                player:Kick("Flying detected!")
+            elseif isNoclipping(player) then
+                sendDiscordMessage(player, "Noclip")
+                player:Kick("Noclip detected!")
+            elseif isTeleporting(player) then
+                sendDiscordMessage(player, "Teleporting")
+                player:Kick("Teleporting detected!")
+            end
+        end
+    end
+end)
+
+-- Connect player events
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
